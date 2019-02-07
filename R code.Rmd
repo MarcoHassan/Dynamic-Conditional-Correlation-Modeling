@@ -1,0 +1,602 @@
+---
+title: "Econometrics II Assignment"
+---
+
+Working Directory
+```{r}
+setwd("C:/Users/Marco Hassan/Desktop/Econometrics II/Assignment/Data")
+```
+
+Libararies
+```{r}
+library(boot)
+library(fields)
+library(robustbase)
+library(ggplot2)
+library(gmm)
+library(moments)
+library(AER)
+```
+
+===
+Simple OLS replication
+===
+
+Dataset
+```{r}
+library(haven)
+X2_OLS <- read_dta("Data/2. OLS.dta")
+```
+
+Select Base sample data
+```{r}
+base <-  X2_OLS[!is.na(X2_OLS$baseco >= 1), 1:8]
+```
+
+Regression
+```{r}
+lm1 <- lm(base$logpgp95 ~  base$avexpr + base$lat_abst + base$africa + base$africa)
+
+lm2 <- lm(X2_OLS$logpgp95 ~ X2_OLS$avexpr)
+
+plot(lm1)
+```
+
+
+===
+Bootstrapping intuition
+===
+
+Create data frame
+```{r}
+t1 = as.data.frame(cbind(base$logpgp95, base$avexpr, base$lat_abst, base$africa, base$asia))
+names(t1) <- colnames(base[c(5, 4, 3, 2, 7)])
+
+t2 = as.data.frame(cbind(X2_OLS$logpgp95, X2_OLS$avexpr))
+names(t2) <- colnames(base[c(5, 4)])
+```
+
+Sample from the given data frame
+```{r}
+nb = 5000
+bet = NULL ; n = NROW(t1)
+for (i in 1:nb){
+  unifnum = sample(c(1:n),n,replace = T)	
+  bet[i] = lm(t1[unifnum,1]~t1[unifnum,2] + t1[unifnum,3]+ t1[unifnum,4]+ t1[unifnum,5])$coef[2]
+}
+
+bet2=NULL; n2 = NROW(t2)
+for (i in 1:nb){
+  unifnum = sample(c(1:n2),n2,replace = T)	
+  bet2[i] = lm(t2[unifnum,1]~t2[unifnum,2])$coef[2]
+}
+```
+
+--> Not working: not converging
+
+bet2.2 = NULL; n2.2 = NROW(t1)
+for (i in 1:nb){
+  unifnum = sample(c(1:n2.2),n2.2,replace = T)	
+  LL <- function(beta0, beta1, mu, sigma) {
+    R = t1[unifnum, 1] - t2[unifnum,2] * beta1 - beta0
+    R = suppressWarnings(dnorm(R, mu, sigma))
+    -sum(log(R))}
+    
+    bet2.2[i] <- coef(mle(LL, start = list(beta0 = 5, beta1 = 0.5, mu = 0.08,
+                                           sigma=.7)))[2]
+}
+
+
+Plot results
+```{r}
+histo <- function(bet, lm1){
+  lwd1 = 2.5
+  
+  den = density(bet)
+  bethat <- bquote(Histogram~of ~bold(widehat(beta))) 
+  h = hist(bet, breaks = 100, freq = NULL, probability = F, xlab =
+             expression(bold(widehat(beta))), cex.lab = 1.6, main =   bethat )
+  xline(mean(bet), lty = 6, col = "blue", lwd = lwd1) ; xline(lm1$coef[2], lty = 6,
+                                                              col = 2, lwd = lwd1)
+  xline(mean(bet)+1.96*summary(lm1)$coef[2,2],lty = 6, col = 2, lwd = lwd1)
+  xline(mean(bet)-1.96*summary(lm1)$coef[2,2], lty= 6, col = 2, lwd = lwd1)
+  xline(quantile(bet,.025), col = "blue", lty = 6, lwd = lwd1) ;
+  xline(quantile(bet,.975), col = "blue", lty=6, lwd = lwd1)
+  
+  xfit<-seq(min(bet),max(bet),length=length(bet))
+  yfit<-dnorm(xfit,mean=mean(bet),sd=sd(bet))
+  yfit <- yfit*diff(h$mids[1:2])*length(bet)
+  lines(xfit, yfit, col="blue", lwd=2)
+  yfit2<-dnorm(xfit,mean=lm1$coef[2],sd=summary(lm1)$coef[2,2])
+  yfit2 <- yfit2*diff(h$mids[1:2])*length(bet)
+  lines(xfit, yfit2, col=2, lwd=2)
+  legend("topleft", legend=c("empirical denisty statistics", "normal denisty
+                             statistics"),
+       col=c("blue","red"), lty= 6, cex=0.8)
+}
+```
+
+Histogram base sample
+```{r}
+histo(bet, lm1)
+histo(bet2, lm2)
+```
+
+Try model based resampling
+```{r}
+
+t3 <- as.data.frame(na.omit(cbind(X2_OLS$logpgp95, X2_OLS$avexpr)))
+colnames(t3) <-  cbind("Log", "Aver")
+
+anBase <- anova(lm(t3$Log ~ t3$Aver))
+Fbase <- anBase["t3$Aver", "F value"]
+pBase <- anBase["t3$AVer", "Pr(>F)"]
+
+#H0-Modell in Basisstichprobe anpassen
+fit0 <- lm(t3$Log  ~ 1) # Modellanpassung
+E <- residuals(fit0) # ursprüngliche Residuen
+Er <- E / sqrt(1-hatvalues(fit0)) # reskalierte Residuen
+Yhat <- fitted(fit0) # ursprüngliche Vorhersage
+# ANOVA-Parameter für ursprüngliche Gruppenzugehörigkeiten und Y*
+getAnova <- function(dat, idx) {
+ Ystar <- Yhat + Er[idx] # Resample-AV Y* = Y^ + E*
+ anBS <- anova(lm(Ystar ~ t3$Aver, data=dat)) # ANOVA Resample-AV
+ anBS["t3$Aver", "F value"] # F*-Wert Replikation
+}
+
+nR <- 5000 # Anzahl Replikationen
+bsAnova <- boot(t3, statistic=getAnova, R=nR)
+
+## F* aus Bootstrap-Replikationen
+Fstar <- bsAnova$t
+# numerische Toleranz wg. Gleitkomma-Arithmetik
+tol <- .Machine$double.eps^0.5
+# Fstar größer Basis-F ODER Fstar ungefähr gleich Basis-F?
+FsIsGEQ <- (Fstar > Fbase) | (abs(Fstar - Fbase) < tol)
+# p-Wert: Anteil der mindestens so extremen F* wie Basis F
+(pValBS <- (sum(FsIsGEQ) + 1) / (length(Fstar) + 1))
+# Grafik: kumulierte relative Häufigkeiten von F*
+
+plot(Fstar, ecdf(Fstar)(Fstar), col="gray60", pch=1,
+ xlab="f* bzw. f", ylab="P(F <= f)",
+ main="F*: Kumulierte rel. Häufigkeiten und Verteilungsfunktion")
+# theoretische Verteilungsfunktion von t und Legende
+curve(pf(x, 1, 110), lwd=2, add=TRUE)
+ legend(x="topleft", lty=c(NA, 1), pch=c(1, NA), lwd=c(2, 2),
+ col=c("gray60", "black"), legend=c("F*", "F"))
+
+
+```
+
+
+
+
+
+
+Constructed test on real normal distributed variable 
+```{r}
+eps <- rnorm(NROW(t1), 0, sd(base$avexpr))
+fakey <- predict(lm1) +eps
+lm_fake = lm(fakey~base$avexpr)
+fakebet = NULL
+for (i in 1:nb){
+  unifnum = sample(c(1:n),n,replace = T)	
+  fakebet[i] = lm(fakey[unifnum]~base$avexpr[unifnum])$coef[2]
+}
+
+histo(fakebet, lm_fake)
+```
+
+QQ-plot
+```{r}
+## QQ-plots
+qqnorm(bet); qqline(bet, col ="red", lty =2, lwd = 2)
+```
+
+Confidence limits
+```{r}
+confidence <- function(bet, lm1){
+  bias <- mean(bet) - lm1$coefficients[2]
+  
+  boot_coorected_estim <- lm1$coefficients[2] - bias
+  
+  ## Assuming normality, the approximate 95% confidence interval is given by CVd ± 1.96pVar(bootstrap)
+  
+  Low <- lm1$coefficients[2] - bias - 1.96*sqrt(var(bet))
+  High <- lm1$coefficients[2] - bias + 1.96*sqrt(var(bet))
+  return(c("bias"=bias, "corrected estimate"=boot_coorected_estim, "low CI"= Low,
+           "High CI" = High))
+}
+```
+
+Confidence results
+```{r}
+confidence(bet, lm1)
+summary(lm1)
+confidence(bet2, lm2)
+```
+
+Using boot package
+```{r}
+beta_function <- function(dat, i, func){
+  resampled <- dat[i, ]
+  return(lm(resampled[,1]~resampled[,2]+ resampled[,3]+ resampled[,4]+ resampled[,5], data = resampled)$coef[2]) 
+}
+```
+
+Bootstrapped results
+```{r}
+bootbet <- boot(dat=t1, statistic=beta_function, R=5000) 
+bootbet
+```
+
+
+Confidence intervals
+```{r}
+boot.ci(boot.out = bootbet, type = c("norm", "basic", "perc", "bca"))
+
+jack.after.boot(bootbet, main = "Jackknife after Boot in  simple OLS")
+```
+
+===
+Plots of IV approach
+===
+
+Import Dataset and select relevant base sample
+```{r}
+library(haven)
+X4_IV_regression_of_Log_GDP_per_capita <- read_dta("Data/4. IV regression of Log_GDP per capita.dta")
+
+base2 <- X4_IV_regression_of_Log_GDP_per_capita[!is.na(X4_IV_regression_of_Log_GDP_per_capita$baseco >= 1), 1:9]
+```
+
+
+
+===
+Plotting results
+===
+Plot reduced form
+```{r}
+c<- ggplot(base2, aes(x=base2$logem4, y=base2$logpgp95)) + 
+  geom_point(color='black', size = 2, alpha =0.8) + 
+  geom_smooth(method=lm, color='blue')+
+  xlab("Log Settler Mortality")+ ylab("Log GDP")+ ggtitle("Reduced form regression")+
+  theme_bw()
+```
+
+
+Plot First Stage
+```{r}
+a <- ggplot(base2, aes(x=base2$logem4, y=base2$avexpr)) + 
+  geom_point(color='black', size = 2, alpha =0.8) + 
+  geom_smooth(method=lm, color='blue')+
+  xlab("Log Settler Mortality")+ ylab("Average expropration rate")+ ggtitle("First stage regression")+
+  theme_bw()
+```
+
+Plot second stage
+```{r}
+b <- ggplot(base2, aes(x=base2$avexpr, y=base2$logpgp95)) + 
+  geom_point(color='black', size = 2, alpha =0.8) + 
+  geom_smooth(method=lm, color='blue')+
+  xlab("Average expropration rate")+ ylab("Log GDP")+ ggtitle("Second stage regression")+
+  theme_bw()
+```
+
+Multiplot function
+```{r}
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                     ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+  if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+```
+
+Multiplot three regressions
+```{r}
+multiplot(plotlist = list(a,b,c), cols = 3)
+```
+
+===
+Correlation Analysis
+===
+```{r}
+help <- as.matrix(cbind(base2$africa, base2$lat_abst, base2$rich4, base2$avexpr,
+                        base2$logpgp95,  base2$logem4, base2$asia))
+colnames(help) <-colnames(base2[,c(-1,-9)])
+cor(help)
+```
+
+
+===
+OLS Reduced Form
+===
+
+OLS
+```{r}
+lm3 <- lmrob(base2$logpgp95 ~ base2$logem4 + base2$africa + base2$asia + 
+            base$lat_abst)
+
+summary(lm3)
+
+plot.new()
+layout(matrix(1:4,2,2)) 
+plot(lm3)
+```
+
+
+===
+Bootstrapped Variance
+===
+
+Using boot package
+```{r}
+beta_function2<- function(dat, i, func){
+  resampled <- dat[i, ]
+  return(lmrob(resampled[,1]~resampled[,2]+ resampled[,3]+ resampled[,4] , dat = resampled)$coef[2]) 
+}
+```
+
+Create Dataframe 
+```{r}
+t3 <-  as.data.frame(cbind(base2$logpgp95, base2$logem4, base2$africa, base2$lat_abst))
+```
+
+
+Bootstrapped results
+```{r}
+bootbet2 <- suppressWarnings(boot(dat=t3, statistic=beta_function2, R=5000)) 
+```
+
+Histogram plot
+```{r}
+histo(bootbet2$t, lm3)
+```
+
+Interpretation of the shifted curve 
+```{r}
+jack.after.boot(bootbet2) ## without 20 and 51 much shorter confidence intervals
+## Huge effect of singapore!!
+```
+
+
+Confidence intervals
+```{r}
+boot.ci(boot.out = bootbet2, type = c("norm", "basic", "perc", "bca"))
+```
+
+===
+GMM
+===
+
+OLS First stage
+```{r}
+lm4 <- lm(base2$avexpr ~ base2$logem4 + base2$africa + base2$asia + 
+            base$lat_abst)
+
+summary(lm4)
+layout(matrix(1:4, 2, 2))
+plot(lm4)
+
+```
+
+GMM
+```{r}
+GMM <- gmm(base2$logpgp95 ~ base2$avexpr + base2$africa+
+       base2$asia + base$lat_abst,  ~  base2$logem4 + base2$africa+
+       base2$asia + base$lat_abst, type="twoStep", wmatrix = "optimal")
+
+summary(GMM)
+
+confint(GMM)
+```
+
+===
+Bootstrapped Variance GMM
+===
+```{r}
+t4 <- as.data.frame(cbind(base2$logpgp95, base2$avexpr, base2$africa, base2$asia,
+                          base2$lat_abst,  base2$logem4))
+
+
+beta_function3<- function(dat, i){
+  resampled <<- dat[i, ]
+  return(gmm(resampled[,1] ~ resampled[,2] + resampled[,3]+
+       resampled[,4] + resampled[,5], ~ resampled[,6] + resampled[,3]+
+       resampled[,4] + resampled[,5], type="twoStep", vcov = "iid", wmatrix = "optimal")$coef[2])
+}
+
+bootbet3 <- boot(t4, statistic=beta_function3, R=5000)
+```
+
+
+Plot bootstrapped gmm coefficients
+```{r}
+plot.new()
+lwd1 = 2.5
+ 
+hist(bootbet3$t, breaks = 12000, freq = NULL, probability = F, xlim=range(-6:6), 
+     xlab = expression(bold(widehat(beta))), axes=T, cex.lab = 1.6, 
+     main = bquote(Histogram~of ~bold(widehat(beta))~ GMM), col=rgb(0,0,1,1/3))
+```
+
+Summary statistics bootstrapped coefficients
+```{r}
+summary(bootbet3$t)
+skewness(bootbet3$t)
+kurtosis(bootbet3$t)
+```
+
+QQ-plot
+```{r}
+qqnorm(bootbet3$t, main="GMM Normal QQ-Plot"); qqline(bootbet3$t, col ="red", lty =2, lwd = 2)
+```
+
+Jack after boot
+```{r}
+jack.after.boot(bootbet3, main = "Jack-knife on Bootstrapped GMM")
+```
+
+Confidence intervals
+```{r}
+boot.ci(bootbet3)
+bootbet3
+```
+
+===
+TSLS 
+===
+
+```{r}
+TSLS <- ivreg(base2$logpgp95 ~ base2$avexpr + base2$africa+
+       base2$asia + base$lat_abst | base2$logem4 + base2$africa+
+       base2$asia + base$lat_abst)
+
+summary(TSLS)
+
+confint(TSLS)
+```
+
+===
+Bootstrapped variance TSLS
+===
+```{r}
+beta_function4<-  function(dat, i){
+  resampled2 <<- dat[i,]
+  bet4[i] <- return(ivreg(resampled2[,1] ~ resampled2[,2] + resampled2[,3]+
+       resampled2[,4] + resampled2[,5]| resampled2[,6] + resampled2[,3]+
+       resampled2[,4] + resampled2[,5])$coefficients[2])
+}
+
+
+bootbet4 <- boot(data = t4, beta_function4, R=5000)
+```
+
+TSLS histogram
+```{r}
+hist(bootbet4$t, breaks = 7000, freq = NULL, probability = F, xlim=range(-7:7), 
+     xlab = expression(bold(widehat(beta))),  cex.lab = 1.6, 
+     main=bquote(Histogram~of ~bold(widehat(beta))~TSLS), 
+     col=rgb(0,0,1,1/2))
+
+plot.new()
+lwd1 = 2.5
+hist(bootbet4$t, breaks = 7000, freq = NULL, probability = F, xlim=range(-7:7), 
+     xlab = expression(bold(widehat(beta))),  cex.lab = 1.6, main="", 
+     col=rgb(0,0,1,1/3))
+par(new=T)
+hist(bootbet3$t, breaks = 25000, freq = NULL, probability = F, xlim=range(-7:7), 
+     xlab = expression(bold(widehat(beta))), axes=F, alpha=0.3, cex.lab = 1.6, 
+     main =bquote(Histogram~of ~bold(widehat(beta))~TSLS~vs.~GMM), col=rgb(1,0,0,1/3))
+legend("topleft", legend=c("TSLS", "GMM"), lty= 1,  col = c(rgb(0,0,1,1/2), rgb(1,0,0,1/2)))
+
+```
+
+
+Summary statistics bootstrapped coefficients
+```{r}
+summary(bootbet4$t)
+skewness(bootbet4$t)
+kurtosis(bootbet4$t)
+```
+
+
+Confidence interval
+```{r}
+boot.ci(bootbet4)
+
+bootbet4
+```
+
+
+===
+GMM more simple regression
+===
+
+Specify database
+```{r}
+t5 <- as.data.frame(cbind(base2$logpgp95, base2$avexpr, base2$logem4))
+```
+
+TSLS
+```{r}
+TSLS2 <- ivreg(base2$logpgp95 ~  base2$avexpr | base2$logem4)
+```
+
+Normal GMM
+```{r}
+GMM1 <- gmm(base2$logpgp95 ~  base2$avexpr, ~  base2$logem4 , type="twoStep", 
+            wmatrix = "optimal")
+```
+
+Bootstrap
+```{r}
+beta_function5 <- function(dat, i){
+  resampled3 <<- dat[i,]
+  bet4[i] <- return(gmm(resampled3[,1] ~ resampled3[,2], ~
+                    resampled3[,3], type="twoStep", wmatrix =
+         "optimal", optfct = "nlminb")$coefficients[2])
+}
+
+beta_function6 <- function(dat, i){
+  resampled4 <- dat[i,]
+  bet4[i] <- return(ivreg(resampled4[,1] ~ resampled4[,2] |
+                    resampled4[,3])$coefficients[2])
+}
+
+## Look at standard errors much higher for optimal GMM as predicted by theory
+bootbet5 <- boot(data = t5, beta_function5, R=5000)
+bootbet6 <- boot(t5, beta_function6, R=5000)
+```
+
+Results
+```{r}
+bootbet5
+bootbet6
+```
+
+
+Jack after Boot
+```{r}
+jack.after.boot(bootbet5, main ="GMM")
+jack.after.boot(bootbet6, main ="2SLS")
+```
+
+Plot
+```{r}
+par(mfrow = c(1,2))
+hist(bootbet5$t, breaks = 5000, xlim = range(-5:10), col = "blue")
+hist(bootbet6$t, breaks = 3000, xlim = range(-5:10), col = "red")
+```
+
+
+
