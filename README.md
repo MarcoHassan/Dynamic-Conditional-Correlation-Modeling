@@ -4,7 +4,9 @@ Author: Marco Hassan & Martina Porubcova & Mattia Palese
 
 Class: Financial Volatility
 
-Literature: This study is a reproduction of the paper "Financialization in commodity markets: A passing trend or the new normal?" of Zeno Adams and Thorsten Glück published in 2015 by Elsevier.
+#### Literature
+
+This study is a reproduction of the paper "Financialization in commodity markets: A passing trend or the new normal?" of Zeno Adams and Thorsten Glück published in 2015 by Elsevier.
 
 # The idea
 
