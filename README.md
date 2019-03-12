@@ -19,12 +19,3 @@ A simple plot of the S&P 500 in red vs. the GSCI composite index seems to confir
 Important is nonetheless to notice that correlation, like volatility is a non observed value but rather a statistics computed at determined time points given a sufficient number of observations.
 
 Given that we are interested in a times series development of correlation a more advanced techique is necessary. To extract the times series behaviour of commodities and equity indices we therefore decided upon approximating the correlation observations at each time point in the series by using the covariates estimation that results applying a multivarite GARCH model to the series. 
-
-Mild evidence is found for such behaviour especially in the Alluminium and Copper series.
-
-![image](https://user-images.githubusercontent.com/42472072/52443598-ce3b6600-2b2e-11e9-8a0a-f65ce30e39ae.png)
-
-Such trend seems however rather temporary and recently disappearing.
-
-![image](https://user-images.githubusercontent.com/42472072/52443694-1490c500-2b2f-11e9-9f62-6535515990df.png)
-
